@@ -4,10 +4,15 @@ set -euo pipefail
 # ── Config ───────────────────────────────────────────────────────────
 QUARANTINE_HOURS="${QUARANTINE_HOURS:-18}"
 PORT="${PORT:-4873}"
+NPM_UPSTREAM="${NPM_UPSTREAM:-https://registry.npmjs.org}"
+PYPI_UPSTREAM="${PYPI_UPSTREAM:-https://pypi.org}"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LABEL="com.blueghost.proxy"
-NPM_REGISTRY="http://localhost:${PORT}"
-PYPI_INDEX="http://localhost:${PORT}/simple/"
+PROXY_HOST="127.0.0.1"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/blueghost"
+STATE_UNSET="__BLUEGHOST_UNSET__"
+NPM_REGISTRY="http://${PROXY_HOST}:${PORT}"
+PYPI_INDEX="http://${PROXY_HOST}:${PORT}/simple/"
 
 # ── Helpers ──────────────────────────────────────────────────────────
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
@@ -30,6 +35,103 @@ os() {
   esac
 }
 
+ensure_state_dir() {
+  mkdir -p "$STATE_DIR"
+}
+
+state_file() {
+  printf '%s/%s\n' "$STATE_DIR" "$1"
+}
+
+has_saved_value() {
+  local value="${1:-}"
+  [[ -n "$value" && "$value" != "default" && "$value" != "null" && "$value" != "undefined" ]]
+}
+
+backup_value_once() {
+  local key="$1"
+  local value="${2:-}"
+  local file missing
+  file="$(state_file "$key")"
+  missing="${file}.missing"
+
+  if [[ -e "$file" || -e "$missing" ]]; then
+    return
+  fi
+
+  ensure_state_dir
+  if has_saved_value "$value"; then
+    printf '%s' "$value" > "$file"
+  else
+    : > "$missing"
+  fi
+}
+
+load_state_value() {
+  local file missing
+  file="$(state_file "$1")"
+  missing="${file}.missing"
+
+  if [[ -f "$missing" ]]; then
+    printf '%s' "$STATE_UNSET"
+    return 0
+  fi
+
+  [[ -f "$file" ]] || return 1
+  cat "$file"
+}
+
+clear_state_value() {
+  local file
+  file="$(state_file "$1")"
+  rm -f "$file" "${file}.missing"
+}
+
+backup_file_once() {
+  local key="$1"
+  local path="$2"
+  local file missing
+  file="$(state_file "$key")"
+  missing="${file}.missing"
+
+  if [[ -e "$file" || -e "$missing" ]]; then
+    return
+  fi
+
+  ensure_state_dir
+  if [[ -f "$path" ]]; then
+    cp "$path" "$file"
+  else
+    : > "$missing"
+  fi
+}
+
+restore_file_backup() {
+  local key="$1"
+  local path="$2"
+  local file missing
+  file="$(state_file "$key")"
+  missing="${file}.missing"
+
+  if [[ -f "$missing" ]]; then
+    rm -f "$path" "$missing"
+    return 0
+  fi
+
+  if [[ -f "$file" ]]; then
+    cp "$file" "$path"
+    rm -f "$file"
+    return 0
+  fi
+
+  return 1
+}
+
+is_proxy_value() {
+  local value="${1:-}"
+  [[ "$value" == *"localhost"* || "$value" == *"127.0.0.1"* ]]
+}
+
 # ── Install as background service ────────────────────────────────────
 install_service() {
   need_bun
@@ -38,6 +140,7 @@ install_service() {
 
   if [[ "$(os)" == "macos" ]]; then
     local PLIST=~/Library/LaunchAgents/${LABEL}.plist
+    mkdir -p "$(dirname "$PLIST")"
     cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -58,6 +161,10 @@ install_service() {
     <string>${QUARANTINE_HOURS}</string>
     <key>PORT</key>
     <string>${PORT}</string>
+    <key>NPM_UPSTREAM</key>
+    <string>${NPM_UPSTREAM}</string>
+    <key>PYPI_UPSTREAM</key>
+    <string>${PYPI_UPSTREAM}</string>
   </dict>
   <key>KeepAlive</key>
   <true/>
@@ -88,6 +195,8 @@ Type=simple
 ExecStart=${BUN_PATH} run ${PROJECT_DIR}/src/server.ts
 Environment=QUARANTINE_HOURS=${QUARANTINE_HOURS}
 Environment=PORT=${PORT}
+Environment=NPM_UPSTREAM=${NPM_UPSTREAM}
+Environment=PYPI_UPSTREAM=${PYPI_UPSTREAM}
 Restart=on-failure
 RestartSec=5
 
@@ -120,17 +229,19 @@ uninstall_service() {
 
 # ── Configure package managers to use proxy ──────────────────────────
 set_defaults() {
-  bold "Configuring package managers → localhost:${PORT}"
+  bold "Configuring package managers → ${PROXY_HOST}:${PORT}"
   echo ""
 
   # npm (also covers yarn v1 & pnpm which read this)
   if command -v npm &>/dev/null; then
+    backup_value_once "npm-registry" "$(npm config get registry 2>/dev/null || true)"
     npm config set registry "$NPM_REGISTRY"
     green "  ✓ npm"
   fi
 
   # pnpm (explicit, in case it doesn't inherit)
   if command -v pnpm &>/dev/null; then
+    backup_value_once "pnpm-registry" "$(pnpm config get registry 2>/dev/null || true)"
     pnpm config set registry "$NPM_REGISTRY" 2>/dev/null
     green "  ✓ pnpm"
   fi
@@ -140,6 +251,7 @@ set_defaults() {
     local yv
     yv="$(yarn --version 2>/dev/null || echo "0")"
     if [[ "$yv" == 2* || "$yv" == 3* || "$yv" == 4* ]]; then
+      backup_value_once "yarn-npmRegistryServer" "$(yarn config get npmRegistryServer 2>/dev/null || true)"
       yarn config set npmRegistryServer "$NPM_REGISTRY" 2>/dev/null
       green "  ✓ yarn (berry)"
     else
@@ -150,6 +262,7 @@ set_defaults() {
   # bun
   local BUNFIG=~/.bunfig.toml
   if command -v bun &>/dev/null; then
+    backup_file_once "bunfig" "$BUNFIG"
     # Create or update global bunfig
     if [[ -f "$BUNFIG" ]]; then
       # Remove existing [install] registry line if present
@@ -170,8 +283,10 @@ set_defaults() {
   if command -v pip &>/dev/null || command -v pip3 &>/dev/null; then
     local PIP_CMD
     PIP_CMD="$(command -v pip3 || command -v pip)"
+    backup_value_once "pip-index-url" "$("$PIP_CMD" config get global.index-url 2>/dev/null || true)"
+    backup_value_once "pip-trusted-host" "$("$PIP_CMD" config get global.trusted-host 2>/dev/null || true)"
     "$PIP_CMD" config set global.index-url "$PYPI_INDEX" 2>/dev/null
-    "$PIP_CMD" config set global.trusted-host "localhost" 2>/dev/null
+    "$PIP_CMD" config set global.trusted-host "$PROXY_HOST" 2>/dev/null
     green "  ✓ pip"
   fi
 
@@ -192,12 +307,26 @@ unset_defaults() {
   echo ""
 
   if command -v npm &>/dev/null; then
-    npm config delete registry 2>/dev/null || true
+    local npm_saved
+    npm_saved="$(load_state_value "npm-registry" 2>/dev/null || printf '%s' "$STATE_UNSET")"
+    if [[ "$npm_saved" == "$STATE_UNSET" ]]; then
+      npm config delete registry 2>/dev/null || true
+    else
+      npm config set registry "$npm_saved" 2>/dev/null || true
+    fi
+    clear_state_value "npm-registry"
     green "  ✓ npm"
   fi
 
   if command -v pnpm &>/dev/null; then
-    pnpm config delete registry 2>/dev/null || true
+    local pnpm_saved
+    pnpm_saved="$(load_state_value "pnpm-registry" 2>/dev/null || printf '%s' "$STATE_UNSET")"
+    if [[ "$pnpm_saved" == "$STATE_UNSET" ]]; then
+      pnpm config delete registry 2>/dev/null || true
+    else
+      pnpm config set registry "$pnpm_saved" 2>/dev/null || true
+    fi
+    clear_state_value "pnpm-registry"
     green "  ✓ pnpm"
   fi
 
@@ -205,24 +334,47 @@ unset_defaults() {
     local yv
     yv="$(yarn --version 2>/dev/null || echo "0")"
     if [[ "$yv" == 2* || "$yv" == 3* || "$yv" == 4* ]]; then
-      yarn config unset npmRegistryServer 2>/dev/null || true
+      local yarn_saved
+      yarn_saved="$(load_state_value "yarn-npmRegistryServer" 2>/dev/null || printf '%s' "$STATE_UNSET")"
+      if [[ "$yarn_saved" == "$STATE_UNSET" ]]; then
+        yarn config unset npmRegistryServer 2>/dev/null || true
+      else
+        yarn config set npmRegistryServer "$yarn_saved" 2>/dev/null || true
+      fi
+      clear_state_value "yarn-npmRegistryServer"
     fi
     green "  ✓ yarn"
   fi
 
   # bun
   local BUNFIG=~/.bunfig.toml
-  if [[ -f "$BUNFIG" ]]; then
-    sed -i.bak '/registry.*localhost/d' "$BUNFIG" 2>/dev/null || true
+  if ! restore_file_backup "bunfig" "$BUNFIG" && [[ -f "$BUNFIG" ]]; then
+    sed -i.bak '/registry.*\(localhost\|127\.0\.0\.1\)/d' "$BUNFIG" 2>/dev/null || true
     rm -f "${BUNFIG}.bak"
+  fi
+  if [[ -f "$BUNFIG" || -f "$(state_file "bunfig")" || -f "$(state_file "bunfig").missing" ]]; then
+    rm -f "$(state_file "bunfig")" "$(state_file "bunfig").missing"
     green "  ✓ bun"
   fi
 
   if command -v pip &>/dev/null || command -v pip3 &>/dev/null; then
     local PIP_CMD
     PIP_CMD="$(command -v pip3 || command -v pip)"
-    "$PIP_CMD" config unset global.index-url 2>/dev/null || true
-    "$PIP_CMD" config unset global.trusted-host 2>/dev/null || true
+    local pip_index_saved pip_host_saved
+    pip_index_saved="$(load_state_value "pip-index-url" 2>/dev/null || printf '%s' "$STATE_UNSET")"
+    pip_host_saved="$(load_state_value "pip-trusted-host" 2>/dev/null || printf '%s' "$STATE_UNSET")"
+    if [[ "$pip_index_saved" == "$STATE_UNSET" ]]; then
+      "$PIP_CMD" config unset global.index-url 2>/dev/null || true
+    else
+      "$PIP_CMD" config set global.index-url "$pip_index_saved" 2>/dev/null || true
+    fi
+    if [[ "$pip_host_saved" == "$STATE_UNSET" ]]; then
+      "$PIP_CMD" config unset global.trusted-host 2>/dev/null || true
+    else
+      "$PIP_CMD" config set global.trusted-host "$pip_host_saved" 2>/dev/null || true
+    fi
+    clear_state_value "pip-index-url"
+    clear_state_value "pip-trusted-host"
     green "  ✓ pip"
   fi
 
@@ -236,7 +388,7 @@ unset_defaults() {
 # ── Status ───────────────────────────────────────────────────────────
 status() {
   echo ""
-  if curl -sf "http://localhost:${PORT}/" >/dev/null 2>&1; then
+  if curl -sf "${NPM_REGISTRY}/" >/dev/null 2>&1; then
     green "● proxy is running on port ${PORT}"
   else
     red "○ proxy is not responding on port ${PORT}"
@@ -248,7 +400,7 @@ status() {
   if command -v npm &>/dev/null; then
     local reg
     reg="$(npm config get registry 2>/dev/null)"
-    if [[ "$reg" == *"localhost"* ]]; then
+    if is_proxy_value "$reg"; then
       green "  ✓ npm → ${reg}"
     else
       dim "  ○ npm → ${reg} (not proxied)"
@@ -256,7 +408,7 @@ status() {
   fi
 
   if command -v bun &>/dev/null && [[ -f ~/.bunfig.toml ]]; then
-    if grep -q "localhost" ~/.bunfig.toml 2>/dev/null; then
+    if grep -Eq "localhost|127\.0\.0\.1" ~/.bunfig.toml 2>/dev/null; then
       green "  ✓ bun → proxied"
     else
       dim "  ○ bun → not proxied"
@@ -267,7 +419,7 @@ status() {
     local PIP_CMD idx
     PIP_CMD="$(command -v pip3 || command -v pip)"
     idx="$("$PIP_CMD" config get global.index-url 2>/dev/null || echo "default")"
-    if [[ "$idx" == *"localhost"* ]]; then
+    if is_proxy_value "$idx"; then
       green "  ✓ pip → ${idx}"
     else
       dim "  ○ pip → ${idx} (not proxied)"
@@ -341,6 +493,8 @@ usage() {
   Environment:
     QUARANTINE_HOURS=18        Hours to quarantine new versions (default: 18)
     PORT=4873                  Port to run on (default: 4873)
+    NPM_UPSTREAM=...           Override upstream npm registry
+    PYPI_UPSTREAM=...          Override upstream PyPI registry
 
 EOF
 }

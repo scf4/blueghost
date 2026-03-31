@@ -5,7 +5,11 @@
   "scripts": {
     "start": "bun run src/server.ts",
     "dev": "bun run --watch src/server.ts",
-    "typecheck": "bunx tsc --noEmit"
+    "test": "bun run test:unit && bun run test:integration",
+    "test:unit": "bun test test/unit",
+    "test:integration": "bun test test/integration",
+    "typecheck": "bunx tsc --noEmit",
+    "check": "bun run typecheck && bun run test"
   },
   "license": "MIT",
   "devDependencies": {
