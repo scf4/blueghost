@@ -34,6 +34,14 @@ export interface SetupRecord {
   updatedAt: string;
 }
 
+export interface PendingSetupRecord {
+  version: 1;
+  previousRecord: SetupRecord | null;
+  intendedRecord: SetupRecord;
+  affectedPackageManagers: SupportedPackageManager[];
+  updatedAt: string;
+}
+
 export interface SetupChoices {
   port: number;
   quarantineHours: number;

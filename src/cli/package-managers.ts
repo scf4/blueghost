@@ -80,6 +80,27 @@ export function configurePackageManagers(options: {
   return configured;
 }
 
+export function plannedPackageManagers(options: {
+  jsEnabled: boolean;
+  pythonEnabled: boolean;
+}): SupportedPackageManager[] {
+  const planned: SupportedPackageManager[] = [];
+
+  if (options.jsEnabled) {
+    if (isCommandAvailable("npm")) planned.push("npm");
+    if (isCommandAvailable("pnpm")) planned.push("pnpm");
+    if (isYarnBerry()) planned.push("yarn");
+    if (isCommandAvailable("bun")) planned.push("bun");
+  }
+
+  if (options.pythonEnabled) {
+    if (resolvePipCommand()) planned.push("pip");
+    if (isCommandAvailable("uv")) planned.push("uv");
+  }
+
+  return planned;
+}
+
 export function restorePackageManagers(
   configured: SupportedPackageManager[],
 ): SupportedPackageManager[] {

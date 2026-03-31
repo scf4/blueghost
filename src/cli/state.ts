@@ -9,7 +9,7 @@ import {
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
-import type { SetupRecord } from "./types";
+import type { PendingSetupRecord, SetupRecord } from "./types";
 
 const STATE_UNSET = "__BLUEGHOST_UNSET__";
 
@@ -24,6 +24,10 @@ export function resolveStateDir(): string {
 
 export function resolveSetupRecordPath(): string {
   return join(resolveStateDir(), "config.json");
+}
+
+export function resolvePendingSetupPath(): string {
+  return join(resolveStateDir(), "config.json.pending");
 }
 
 export function ensureStateDir() {
@@ -44,6 +48,22 @@ export function saveSetupRecord(record: SetupRecord) {
 
 export function deleteSetupRecord() {
   rmSync(resolveSetupRecordPath(), { force: true });
+}
+
+export function loadPendingSetup(): PendingSetupRecord | null {
+  const path = resolvePendingSetupPath();
+  if (!existsSync(path)) return null;
+
+  return JSON.parse(readFileSync(path, "utf8")) as PendingSetupRecord;
+}
+
+export function savePendingSetup(record: PendingSetupRecord) {
+  ensureStateDir();
+  writeFileSync(resolvePendingSetupPath(), `${JSON.stringify(record, null, 2)}\n`);
+}
+
+export function deletePendingSetup() {
+  rmSync(resolvePendingSetupPath(), { force: true });
 }
 
 export function stateFile(key: string): string {

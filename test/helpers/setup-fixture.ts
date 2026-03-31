@@ -79,9 +79,9 @@ export function runCli(
   inputText = "",
   extraEnv: Record<string, string> = {},
 ) {
-  const result = spawnText(
+  const result = runCliRaw(
     env,
-    [process.execPath, join(repoRoot, "src", "cli.ts"), ...args],
+    args,
     inputText,
     extraEnv,
   );
@@ -93,6 +93,20 @@ export function runCli(
   }
 
   return result;
+}
+
+export function runCliRaw(
+  env: SetupTestEnvironment,
+  args: string[],
+  inputText = "",
+  extraEnv: Record<string, string> = {},
+) {
+  return spawnText(
+    env,
+    [process.execPath, join(repoRoot, "src", "cli.ts"), ...args],
+    inputText,
+    extraEnv,
+  );
 }
 
 export function seedConfig(
@@ -118,6 +132,23 @@ export function readSetupRecord(env: SetupTestEnvironment) {
     configuredPackageManagers: string[];
     port: number;
   };
+}
+
+export function readPendingSetupRecord(env: SetupTestEnvironment) {
+  const file = join(env.xdgStateHome, "blueghost", "config.json.pending");
+  return existsSync(file)
+    ? JSON.parse(readFileSync(file, "utf8")) as {
+      affectedPackageManagers: string[];
+    }
+    : null;
+}
+
+export function overwriteCommand(
+  env: SetupTestEnvironment,
+  command: string,
+  content: string,
+) {
+  writeCommand(join(env.binDir, command), content);
 }
 
 function fakeConfigCommand(options: { supportsVersion?: boolean } = {}) {
