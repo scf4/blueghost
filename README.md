@@ -27,6 +27,7 @@ The setup flow:
 - probes custom Python upstreams before enabling pip or uv
 - installs a background service with launchd on macOS or user systemd on Linux
 - backs up existing package-manager config for clean uninstall
+- can be re-run safely to change which ecosystems are enabled; configs for disabled ecosystems are restored automatically
 
 ## How It Works
 
@@ -59,6 +60,8 @@ bun run cli:setup
 bun run cli:status
 bun run cli:uninstall
 ```
+
+`cli:status` checks a local health endpoint and reports the current per-ecosystem protection state. If a previous setup attempt did not finish cleanly, it warns before showing the effective state.
 
 You can also run the TypeScript entrypoint directly:
 
@@ -116,6 +119,8 @@ pip config set global.trusted-host 127.0.0.1
 # uv – only when using canonical PyPI or a verified custom upstream
 export UV_INDEX_URL="http://127.0.0.1:4873/simple/"
 ```
+
+For manual Python setup, the blueghost service must also be started with `ENABLE_PYTHON=1`; otherwise `/simple/*` requests are rejected even if pip or uv are pointed at the proxy.
 
 ## Adding A New Registry
 
