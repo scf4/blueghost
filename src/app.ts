@@ -1,3 +1,4 @@
+import { config } from "./config";
 import { handleNpmRequest } from "./registry/npm";
 import { handlePypiRequest, isPypiPath } from "./registry/pypi";
 
@@ -6,6 +7,9 @@ export async function handleProxyRequest(req: Request): Promise<Response> {
 
   try {
     if (isPypiPath(url.pathname)) {
+      if (!config.enablePython) {
+        return new Response("python support is disabled", { status: 503 });
+      }
       return await handlePypiRequest(req, url);
     }
 

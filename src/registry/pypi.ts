@@ -1,4 +1,8 @@
-import { config, QUARANTINE_MS } from "../config";
+import {
+  config,
+  DEFAULT_PYPI_UPSTREAM,
+  QUARANTINE_MS,
+} from "../config";
 import { fetchUpstream, relayResponse } from "../lib/http";
 
 const SIMPLE_PACKAGE_PATTERN = /^\/simple\/([^/]+)\/?$/;
@@ -31,6 +35,16 @@ export async function handlePypiRequest(
   _req: Request,
   url: URL,
 ): Promise<Response> {
+  if (
+    config.pypiUpstream !== DEFAULT_PYPI_UPSTREAM &&
+    !config.pythonUpstreamVerified
+  ) {
+    return new Response(
+      "python support is unavailable for an unverified upstream",
+      { status: 503 },
+    );
+  }
+
   const pkg = parseSimplePackagePath(url.pathname);
 
   if (!pkg) {
@@ -42,6 +56,9 @@ export async function handlePypiRequest(
     });
   }
 
+  // v1 depends on the PyPI JSON API releases field for timestamp data.
+  // If that field disappears, migrate Python timestamp extraction to the
+  // Simple API surface, preferably via PEP 700 data-upload-time.
   const jsonRes = await fetchUpstream(`${config.pypiUpstream}/pypi/${pkg}/json`);
 
   if (jsonRes.status === 404) {

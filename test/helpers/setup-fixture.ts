@@ -9,7 +9,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export interface SetupTestEnvironment {
@@ -22,6 +21,8 @@ export interface SetupTestEnvironment {
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const setupScript = join(repoRoot, "setup.sh");
 const tempDirs: string[] = [];
+const decoder = new TextDecoder();
+const encoder = new TextEncoder();
 
 export function cleanupSetupFixtures() {
   for (const dir of tempDirs.splice(0)) {
@@ -63,25 +64,35 @@ export function runSetup(
   command: string,
   extraEnv: Record<string, string> = {},
 ) {
-  const result = spawnSync("bash", [setupScript, command], {
-    cwd: repoRoot,
-    env: {
-      ...process.env,
-      HOME: env.home,
-      PATH: `${env.binDir}:${process.env.PATH || ""}`,
-      SHELL: "/bin/zsh",
-      FAKE_STATE_DIR: env.stateDir,
-      XDG_STATE_HOME: env.xdgStateHome,
-      ...extraEnv,
-    },
-    encoding: "utf8",
-  });
+  const result = spawnText(env, ["bash", setupScript, command], "", extraEnv);
 
   if (result.status !== 0) {
     throw new Error(
       `setup.sh ${command} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
     );
   }
+}
+
+export function runCli(
+  env: SetupTestEnvironment,
+  args: string[],
+  inputText = "",
+  extraEnv: Record<string, string> = {},
+) {
+  const result = spawnText(
+    env,
+    [process.execPath, join(repoRoot, "src", "cli.ts"), ...args],
+    inputText,
+    extraEnv,
+  );
+
+  if (result.status !== 0) {
+    throw new Error(
+      `cli ${args.join(" ")} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+  }
+
+  return result;
 }
 
 export function seedConfig(
@@ -96,6 +107,17 @@ export function seedConfig(
 export function readConfig(stateDir: string, command: string, key: string) {
   const file = join(stateDir, `${command}.${key}`);
   return existsSync(file) ? readFileSync(file, "utf8") : null;
+}
+
+export function readSetupRecord(env: SetupTestEnvironment) {
+  const file = join(env.xdgStateHome, "blueghost", "config.json");
+  return JSON.parse(readFileSync(file, "utf8")) as {
+    ecosystems: { js: boolean; python: boolean };
+    python: { verified: boolean };
+    upstreams: { npm: string; pypi: string };
+    configuredPackageManagers: string[];
+    port: number;
+  };
 }
 
 function fakeConfigCommand(options: { supportsVersion?: boolean } = {}) {
@@ -142,4 +164,31 @@ esac
 function writeCommand(path: string, content: string) {
   writeFileSync(path, content);
   chmodSync(path, 0o755);
+}
+
+function spawnText(
+  env: SetupTestEnvironment,
+  cmd: string[],
+  inputText = "",
+  extraEnv: Record<string, string> = {},
+) {
+  const result = Bun.spawnSync(cmd, {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      HOME: env.home,
+      PATH: `${env.binDir}:${process.env.PATH || ""}`,
+      SHELL: "/bin/zsh",
+      FAKE_STATE_DIR: env.stateDir,
+      XDG_STATE_HOME: env.xdgStateHome,
+      ...extraEnv,
+    },
+    stdin: encoder.encode(inputText),
+  });
+
+  return {
+    status: result.exitCode,
+    stdout: decoder.decode(result.stdout),
+    stderr: decoder.decode(result.stderr),
+  };
 }

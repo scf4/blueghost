@@ -5,6 +5,9 @@
   "scripts": {
     "start": "bun run src/server.ts",
     "dev": "bun run --watch src/server.ts",
+    "cli:setup": "bun run src/cli.ts setup",
+    "cli:status": "bun run src/cli.ts status",
+    "cli:uninstall": "bun run src/cli.ts uninstall",
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "bun test test/unit",
     "test:integration": "bun test test/integration",

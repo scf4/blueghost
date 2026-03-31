@@ -6,6 +6,7 @@ QUARANTINE_HOURS="${QUARANTINE_HOURS:-18}"
 PORT="${PORT:-4873}"
 NPM_UPSTREAM="${NPM_UPSTREAM:-https://registry.npmjs.org}"
 PYPI_UPSTREAM="${PYPI_UPSTREAM:-https://pypi.org}"
+VERIFIED_PYPI_UPSTREAM="${VERIFIED_PYPI_UPSTREAM:-}"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LABEL="com.blueghost.proxy"
 PROXY_HOST="127.0.0.1"
@@ -165,6 +166,8 @@ install_service() {
     <string>${NPM_UPSTREAM}</string>
     <key>PYPI_UPSTREAM</key>
     <string>${PYPI_UPSTREAM}</string>
+    <key>VERIFIED_PYPI_UPSTREAM</key>
+    <string>${VERIFIED_PYPI_UPSTREAM}</string>
   </dict>
   <key>KeepAlive</key>
   <true/>
@@ -197,6 +200,7 @@ Environment=QUARANTINE_HOURS=${QUARANTINE_HOURS}
 Environment=PORT=${PORT}
 Environment=NPM_UPSTREAM=${NPM_UPSTREAM}
 Environment=PYPI_UPSTREAM=${PYPI_UPSTREAM}
+Environment=VERIFIED_PYPI_UPSTREAM=${VERIFIED_PYPI_UPSTREAM}
 Restart=on-failure
 RestartSec=5
 
@@ -279,22 +283,31 @@ set_defaults() {
     green "  ✓ bun (~/.bunfig.toml)"
   fi
 
-  # pip
-  if command -v pip &>/dev/null || command -v pip3 &>/dev/null; then
-    local PIP_CMD
-    PIP_CMD="$(command -v pip3 || command -v pip)"
-    backup_value_once "pip-index-url" "$("$PIP_CMD" config get global.index-url 2>/dev/null || true)"
-    backup_value_once "pip-trusted-host" "$("$PIP_CMD" config get global.trusted-host 2>/dev/null || true)"
-    "$PIP_CMD" config set global.index-url "$PYPI_INDEX" 2>/dev/null
-    "$PIP_CMD" config set global.trusted-host "$PROXY_HOST" 2>/dev/null
-    green "  ✓ pip"
+  local PYTHON_READY=0
+  if [[ "$PYPI_UPSTREAM" == "https://pypi.org" || "$VERIFIED_PYPI_UPSTREAM" == "$PYPI_UPSTREAM" ]]; then
+    PYTHON_READY=1
   fi
 
-  # uv
-  if command -v uv &>/dev/null; then
-    # uv reads UV_INDEX_URL or pyproject.toml. Best bet: shell profile.
-    _add_env_line "export UV_INDEX_URL=\"${PYPI_INDEX}\""
-    green "  ✓ uv (added UV_INDEX_URL to shell profile)"
+  if [[ "$PYTHON_READY" -eq 1 ]]; then
+    # pip
+    if command -v pip &>/dev/null || command -v pip3 &>/dev/null; then
+      local PIP_CMD
+      PIP_CMD="$(command -v pip3 || command -v pip)"
+      backup_value_once "pip-index-url" "$("$PIP_CMD" config get global.index-url 2>/dev/null || true)"
+      backup_value_once "pip-trusted-host" "$("$PIP_CMD" config get global.trusted-host 2>/dev/null || true)"
+      "$PIP_CMD" config set global.index-url "$PYPI_INDEX" 2>/dev/null
+      "$PIP_CMD" config set global.trusted-host "$PROXY_HOST" 2>/dev/null
+      green "  ✓ pip"
+    fi
+
+    # uv
+    if command -v uv &>/dev/null; then
+      # uv reads UV_INDEX_URL or pyproject.toml. Best bet: shell profile.
+      _add_env_line "export UV_INDEX_URL=\"${PYPI_INDEX}\""
+      green "  ✓ uv (added UV_INDEX_URL to shell profile)"
+    fi
+  elif command -v pip &>/dev/null || command -v pip3 &>/dev/null || command -v uv &>/dev/null; then
+    dim "  ○ Python package managers skipped: custom PyPI upstream is not verified"
   fi
 
   echo ""
@@ -495,6 +508,7 @@ usage() {
     PORT=4873                  Port to run on (default: 4873)
     NPM_UPSTREAM=...           Override upstream npm registry
     PYPI_UPSTREAM=...          Override upstream PyPI registry
+    VERIFIED_PYPI_UPSTREAM=... Mark a custom PyPI upstream as verified
 
 EOF
 }

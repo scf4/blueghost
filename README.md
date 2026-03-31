@@ -2,32 +2,35 @@
 
 <img src="./assets/vulnerable-ghost.png" alt="vulnerable Pac-Man ghost" width="28"> <img src="./assets/vulnerable-ghost.png" alt="vulnerable Pac-Man ghost" width="28"> <img src="./assets/vulnerable-ghost.png" alt="vulnerable Pac-Man ghost" width="28"> <img src="./assets/vulnerable-ghost.png" alt="vulnerable Pac-Man ghost" width="28">
 
-**blueghost** sits between your package manager and the upstream registry, quarantining newly published versions of packages for a short amount of time (default: 18 hours).
+**blueghost** sits between your package manager and the upstream registry, quarantining newly published package versions for a short amount of time (default: 18 hours).
 
-> **IMPORTANT:** The project is new, in active development, and should be used with caution. Please report any issues or flaws. PRs are welcome, personal forks are encouraged.
+> **Important:** The project is new, in active development, and should be used with caution. Please report issues and flaws. PRs are welcome, and personal forks are encouraged.
 
-Currently works with **npm, pnpm, yarn, Bun, pip, and uv.**
-
-See [Adding a new registry](#adding-a-new-registry) for other ecosystems.
+blueghost protects **npm, pnpm, yarn, and Bun** by default. **Python support for pip and uv is opt-in** and only activates after setup verifies that the configured PyPI upstream exposes the metadata needed for safe filtering.
 
 ## Installation
 
-Given the security implications, blueghost will not yet be published to npm or distributed any other way until it is in a more mature state. For now, clone the repo and follow the instructions below.
+Given the security implications, blueghost is not published to npm yet. For now, clone the repo and run the local CLI:
 
 ```bash
 git clone https://github.com/scf4/blueghost
 cd blueghost
-
-# Install as a background service (launchd on macOS, systemd on Linux)
-./setup.sh install
-
-# Configure all detected package managers to route through the proxy
-./setup.sh set-defaults
+bun install
+bun run cli:setup
 ```
 
-## How it works
+The setup flow:
 
-```
+- detects installed package managers
+- enables JS/TS protection by default
+- leaves Python off by default unless you opt in
+- probes custom Python upstreams before enabling pip or uv
+- installs a background service with launchd on macOS or user systemd on Linux
+- backs up existing package-manager config for clean uninstall
+
+## How It Works
+
+```text
 bun install axios              npm registry
        │                            │
        ▼                            │
@@ -45,48 +48,58 @@ bun install axios              npm registry
   (1.7.4 doesn't exist)
 ```
 
-The same logic applies to every package in the dependency tree. If `axios` pulls in `follow-redirects` and that package has a 2-hour-old version, it gets stripped too — even if nothing pins it.
+The same logic applies throughout the dependency tree. If `axios` pulls in `follow-redirects` and that package has a 2-hour-old version, it gets stripped too even if you did not pin it directly.
 
-> **Note:** If **all** versions of a package are newer than the quarantine window (i.e. it's a brand-new package), every version passes through unchanged. The quarantine targets malicious *updates* to existing packages, not new packages.
+If **all** versions of a package are newer than the quarantine window, the package passes through unchanged. blueghost is designed to block suspicious *updates* to existing packages, not brand-new packages.
 
-## Commands
+## CLI Commands
 
 ```bash
-./setup.sh install         # Install background service
-./setup.sh uninstall       # Remove background service
-./setup.sh set-defaults    # Point all package managers at proxy
-./setup.sh unset-defaults  # Revert to upstream registries
-./setup.sh status          # Check what's running & configured
+bun run cli:setup
+bun run cli:status
+bun run cli:uninstall
 ```
 
-## Important caveats
+You can also run the TypeScript entrypoint directly:
 
-**Project-level overrides.** The proxy configures registries at the global level. A project with its own `.npmrc`, `bunfig.toml`, or `pyproject.toml` pointing at a different registry will bypass the proxy. This is usually desirable (private registries), but be aware of it.
+```bash
+bun run src/cli.ts setup
+bun run src/cli.ts status
+bun run src/cli.ts uninstall
+```
 
-**Extra indexes (pip).** If you have `--extra-index-url` configured for private packages, those additional indexes bypass the proxy. Only the primary `--index-url` is rerouted.
+`setup.sh` still exists as an advanced or manual path, but the CLI is the primary setup flow.
 
-**Private registries.** Set `NPM_UPSTREAM` and `PYPI_UPSTREAM` to your upstream registry URLs as needed. The proxy doesn't currently forward authentication headers.
+## Important Caveats
+
+**Project-level overrides.** blueghost configures registries globally. A project with its own `.npmrc`, `bunfig.toml`, `pyproject.toml`, or equivalent registry override can bypass the proxy. That is often desirable for private registries, but it changes what blueghost protects.
+
+**Python support is capability-gated.** Canonical `https://pypi.org` is the tested path. Custom Python upstreams are only enabled if setup can verify the upstream's Simple API and timestamp metadata. If setup cannot verify that capability, pip and uv remain untouched.
+
+**No silent bypass on proxy failure.** If the proxy is unavailable, installs should fail rather than quietly talking to the upstream directly. That is intentional: blueghost should not silently disable its own protection.
+
+**Extra indexes can bypass the proxy.** Additional Python indexes such as `--extra-index-url` or project-level Poetry sources are outside the primary rerouted index unless you configure them separately.
+
+**Authentication passthrough is limited.** blueghost does not currently forward upstream authentication headers. If your private registry requires auth, plan accordingly.
 
 ## Configuration
 
-Everything is via environment variables:
+Everything is configured with environment variables on the service:
 
 | Variable | Default | Description |
 |---|---|---|
-| `QUARANTINE_HOURS` | `18` | How many hours a version must age before it's allowed through |
-| `PORT` | `4873` | Port the proxy listens on |
+| `QUARANTINE_HOURS` | `18` | How many hours a version must age before it is allowed through |
+| `PORT` | `4873` | Local proxy port |
 | `NPM_UPSTREAM` | `https://registry.npmjs.org` | Upstream npm registry |
-| `PYPI_UPSTREAM` | `https://pypi.org` | Upstream PyPI |
+| `PYPI_UPSTREAM` | `https://pypi.org` | Upstream PyPI registry |
+| `ENABLE_PYTHON` | `0` or `1` from setup | Whether Python routing is enabled in the service |
+| `VERIFIED_PYPI_UPSTREAM` | empty unless verified | Records which custom Python upstream passed setup verification |
 
-To change settings for an installed service, edit the environment variables in the launchd plist (`~/Library/LaunchAgents/com.blueghost.proxy.plist`) or the systemd unit (`~/.config/systemd/user/blueghost.service`), then restart the service. Or pass them when installing:
+If you change `PYPI_UPSTREAM`, re-run `bun run cli:setup` so blueghost can probe the new upstream before enabling Python support.
 
-```bash
-QUARANTINE_HOURS=72 PORT=5555 ./setup.sh install
-```
+## Manual Package Manager Setup
 
-## Manual package manager setup
-
-If you prefer to configure things yourself instead of using `setup.sh set-defaults`:
+If you need to configure package managers manually instead of using `bun run cli:setup`:
 
 ```bash
 # npm / yarn classic / pnpm
@@ -96,27 +109,25 @@ npm config set registry http://127.0.0.1:4873
 [install]
 registry = "http://127.0.0.1:4873"
 
-# pip
+# pip – only when using canonical PyPI or a verified custom upstream
 pip config set global.index-url http://127.0.0.1:4873/simple/
 pip config set global.trusted-host 127.0.0.1
 
-# uv
+# uv – only when using canonical PyPI or a verified custom upstream
 export UV_INDEX_URL="http://127.0.0.1:4873/simple/"
-
-# poetry – in pyproject.toml
-[[tool.poetry.source]]
-name = "quarantine"
-url = "http://127.0.0.1:4873/simple/"
-priority = "primary"
 ```
 
+## Adding A New Registry
 
-## Adding a new registry
-<a id="adding-a-new-registry"></a>
+Each registry lives under `src/registry/`. The pattern is:
 
-Each registry is currently a single file in `src/`. The pattern is: 1) Fetch upstream metadata, 2) Filter out versions newer than the quarantine window, 3) Return the modified metadata to the package manager.
+1. Fetch upstream metadata.
+2. Filter out versions or files newer than the quarantine window.
+3. Return the modified response to the package manager.
 
-See `src/npm.ts` or `src/pypi.ts` for examples.
+See `src/registry/npm.ts` and `src/registry/pypi.ts` for the current implementations.
+
+Maintainer note: v1 Python filtering depends on the PyPI JSON `releases` field for timestamp data. If PyPI removes that field, migrate timestamp extraction to the Simple API surface, preferably via PEP 700 `data-upload-time`.
 
 ## License
 
