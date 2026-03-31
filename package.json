@@ -1,0 +1,10 @@
+{
+  "name": "blueghost",
+  "version": "0.1.0",
+  "description": "A local registry proxy that quarantines recently-published package versions to protect against supply-chain attacks.",
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "dev": "bun run --watch src/server.ts"
+  },
+  "license": "MIT"
+}
