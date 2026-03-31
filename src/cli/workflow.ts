@@ -311,6 +311,9 @@ function recoverFromPendingSetup() {
   }
 
   console.log("Recovering from incomplete previous setup.");
+  // Prefer a full restore to the user's pre-blueghost state over trying to
+  // preserve a half-applied setup. A failed rerun should never strand package
+  // managers pointing at a proxy configuration we can no longer trust.
   restorePackageManagers(pending.affectedPackageManagers);
   uninstallService();
   deleteSetupRecord();

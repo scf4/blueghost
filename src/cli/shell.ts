@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+
 export interface CommandResult {
   status: number | null;
   stdout: string;
@@ -7,10 +9,13 @@ export interface CommandResult {
 export function runCommand(
   command: string,
   args: string[],
-  options: { check?: boolean } = {},
+  options: { check?: boolean; cwd?: string } = {},
 ): CommandResult {
   const result = Bun.spawnSync([command, ...args], {
-    cwd: process.cwd(),
+    // Package-manager config commands should run outside the repo checkout.
+    // Tools like pnpm honor the nearest packageManager setting and can refuse
+    // otherwise-global config operations if we execute from this project dir.
+    cwd: options.cwd ?? process.env.HOME ?? homedir() ?? process.cwd(),
     env: process.env,
   });
 
