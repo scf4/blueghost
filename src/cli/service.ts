@@ -90,7 +90,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${bunPath} run ${serverPath}
+ExecStart=${quoteSystemdExec(bunPath)} run ${quoteSystemdExec(serverPath)}
 ${envLines.map(([key, value]) => `Environment=${key}=${escapeSystemd(value)}`).join("\n")}
 Restart=on-failure
 RestartSec=5
@@ -144,4 +144,11 @@ function escapeXml(value: string): string {
 
 function escapeSystemd(value: string): string {
   return value.replaceAll(" ", "\\x20");
+}
+
+function quoteSystemdExec(value: string): string {
+  if (/[\s"\\]/.test(value)) {
+    return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+  }
+  return value;
 }

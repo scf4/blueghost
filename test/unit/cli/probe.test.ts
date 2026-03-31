@@ -99,3 +99,27 @@ test("probePythonUpstream returns a clean error when the upstream is unreachable
   expect(result.ok).toBeFalse();
   expect(result.message).toContain("probe failed");
 });
+
+test("probePythonUpstream returns a clean error when metadata API returns invalid JSON", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+
+    if (url.endsWith("/simple/pip/")) {
+      return new Response("<html></html>", { status: 200 });
+    }
+
+    if (url.endsWith("/pypi/pip/json")) {
+      return new Response("this is not json", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  const result = await probePythonUpstream("https://mirror.example/pypi");
+
+  expect(result.ok).toBeFalse();
+  expect(result.message).toContain("invalid JSON");
+});

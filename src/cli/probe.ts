@@ -25,12 +25,20 @@ export async function probePythonUpstream(
     return jsonRes.result;
   }
 
-  const json = await jsonRes.result.json() as {
+  let json: {
     releases?: Record<
       string,
       Array<{ upload_time?: string; upload_time_iso_8601?: string }>
     >;
   };
+  try {
+    json = await jsonRes.result.json();
+  } catch {
+    return {
+      ok: false,
+      message: "metadata API returned invalid JSON",
+    };
+  }
 
   const releaseEntries = Object.entries(json.releases || {})
     .filter(([, files]) => Array.isArray(files) && files.length > 0);

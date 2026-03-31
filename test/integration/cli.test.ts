@@ -230,6 +230,80 @@ esac
   expect(readPendingSetupRecord(env)).toBeNull();
 });
 
+test("cli setup auto-recovers from a previous failed setup run", () => {
+  const env = createFakeSetupEnvironment();
+  seedConfig(env.stateDir, "npm", "registry", "https://npm.example");
+  overwriteCommand(
+    env,
+    "pnpm",
+    `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "config" && "\${2:-}" == "get" ]]; then
+  echo "https://pnpm.example"
+  exit 0
+fi
+if [[ "\${1:-}" == "config" && "\${2:-}" == "set" ]]; then
+  echo "pnpm failed" >&2
+  exit 1
+fi
+exit 0
+`,
+  );
+
+  const failed = runCliRaw(env, ["setup"], "\n\n\n\n\n");
+  expect(failed.status).not.toBe(0);
+  expect(readPendingSetupRecord(env)).not.toBeNull();
+
+  // Fix pnpm and re-run setup — should auto-recover from pending state
+  overwriteCommand(
+    env,
+    "pnpm",
+    `#!/usr/bin/env bash
+set -euo pipefail
+state_dir="\${FAKE_STATE_DIR:?}"
+store_prefix="\${state_dir}/\${0##*/}"
+mkdir -p "\${state_dir}"
+if [[ "\${1:-}" != "config" ]]; then
+  echo "unsupported command" >&2
+  exit 1
+fi
+action="\${2:-}"
+key="\${3:-}"
+safe_key="\${key//\\//_}"
+safe_key="\${safe_key// /_}"
+file="\${store_prefix}.\${safe_key}"
+case "\${action}" in
+  get)
+    if [[ -f "\${file}" ]]; then
+      cat "\${file}"
+    else
+      echo "undefined"
+    fi
+    ;;
+  set)
+    printf '%s' "\${4:-}" > "\${file}"
+    ;;
+  delete|unset)
+    rm -f "\${file}"
+    ;;
+  *)
+    echo "unsupported config action" >&2
+    exit 1
+    ;;
+esac
+`,
+  );
+
+  const result = runCli(env, ["setup"], "\n\n\n\n\n");
+  expect(result.stdout).toContain("Recovering from incomplete previous setup");
+
+  const record = readSetupRecord(env);
+  expect(record.ecosystems.js).toBeTrue();
+  expect(readPendingSetupRecord(env)).toBeNull();
+  expect(readConfig(env.stateDir, "npm", "registry")).toBe("http://127.0.0.1:4873");
+  expect(readConfig(env.stateDir, "pnpm", "registry")).toBe("http://127.0.0.1:4873");
+});
+
 function startHttpFixture(
   handler: (req: IncomingMessage, res: ServerResponse) => void,
 ): string {
