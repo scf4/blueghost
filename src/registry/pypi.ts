@@ -62,6 +62,9 @@ export async function handlePypiRequest(
   const jsonRes = await fetchUpstream(`${config.pypiUpstream}/pypi/${pkg}/json`);
 
   if (jsonRes.status === 404) {
+    // This is only safe for canonical PyPI or for custom upstreams that were
+    // already verified during setup. Unverified custom upstreams are rejected
+    // before reaching this branch.
     return proxySimple(pkg);
   }
 
@@ -78,8 +81,24 @@ export async function handlePypiRequest(
 
   const json = await jsonRes.json();
   const releases = (json.releases || {}) as ReleaseMap;
-  const { quarantined, blockedFiles, totalVersions } =
+  const {
+    quarantined,
+    blockedFiles,
+    totalVersions,
+    unverifiableVersions,
+  } =
     findQuarantinedReleases(releases);
+
+  if (unverifiableVersions.length > 0) {
+    log(
+      pkg,
+      `BLOCKED - releases missing upload timestamps: ${unverifiableVersions.join(", ")}`,
+    );
+    return new Response(
+      `quarantine: cannot verify version timestamps for ${pkg}`,
+      { status: 502 },
+    );
+  }
 
   if (quarantined.length === 0) {
     return proxySimple(pkg);
@@ -118,9 +137,15 @@ export async function handlePypiRequest(
 export function findQuarantinedReleases(
   releases: ReleaseMap,
   now = Date.now(),
-): { quarantined: string[]; blockedFiles: Set<string>; totalVersions: number } {
+): {
+  quarantined: string[];
+  blockedFiles: Set<string>;
+  totalVersions: number;
+  unverifiableVersions: string[];
+} {
   const quarantined: string[] = [];
   const blockedFiles = new Set<string>();
+  const unverifiableVersions: string[] = [];
   let totalVersions = 0;
 
   for (const [version, files] of Object.entries(releases)) {
@@ -131,7 +156,10 @@ export function findQuarantinedReleases(
       .map((file) => parseUTC(file.upload_time_iso_8601 || file.upload_time))
       .filter(Number.isFinite);
 
-    if (uploads.length === 0) continue;
+    if (uploads.length === 0) {
+      unverifiableVersions.push(version);
+      continue;
+    }
 
     const newest = Math.max(...uploads);
     if (now - newest < QUARANTINE_MS) {
@@ -142,7 +170,7 @@ export function findQuarantinedReleases(
     }
   }
 
-  return { quarantined, blockedFiles, totalVersions };
+  return { quarantined, blockedFiles, totalVersions, unverifiableVersions };
 }
 
 export function filterSimpleHtml(

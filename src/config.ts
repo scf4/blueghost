@@ -2,7 +2,7 @@ export const DEFAULT_NPM_UPSTREAM = "https://registry.npmjs.org";
 export const DEFAULT_PYPI_UPSTREAM = "https://pypi.org";
 
 const hours = parseInt(process.env.QUARANTINE_HOURS || "18", 10);
-const enablePython = process.env.ENABLE_PYTHON !== "0";
+const enablePython = process.env.ENABLE_PYTHON === "1";
 const verifiedPypiUpstream = process.env.VERIFIED_PYPI_UPSTREAM || "";
 const pypiUpstream = process.env.PYPI_UPSTREAM || DEFAULT_PYPI_UPSTREAM;
 

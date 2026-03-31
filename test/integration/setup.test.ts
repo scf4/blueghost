@@ -37,7 +37,9 @@ test("setup.sh restores existing registry configuration on unset-defaults", () =
   );
   seedConfig(env.stateDir, "pip3", "global.trusted-host", "pip.example");
 
-  runSetup(env, "set-defaults");
+  runSetup(env, "set-defaults", {
+    ENABLE_PYTHON: "1",
+  });
 
   expect(readConfig(env.stateDir, "npm", "registry")).toBe(
     "http://127.0.0.1:4873",

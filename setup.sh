@@ -6,6 +6,7 @@ QUARANTINE_HOURS="${QUARANTINE_HOURS:-18}"
 PORT="${PORT:-4873}"
 NPM_UPSTREAM="${NPM_UPSTREAM:-https://registry.npmjs.org}"
 PYPI_UPSTREAM="${PYPI_UPSTREAM:-https://pypi.org}"
+ENABLE_PYTHON="${ENABLE_PYTHON:-0}"
 VERIFIED_PYPI_UPSTREAM="${VERIFIED_PYPI_UPSTREAM:-}"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LABEL="com.blueghost.proxy"
@@ -166,6 +167,8 @@ install_service() {
     <string>${NPM_UPSTREAM}</string>
     <key>PYPI_UPSTREAM</key>
     <string>${PYPI_UPSTREAM}</string>
+    <key>ENABLE_PYTHON</key>
+    <string>${ENABLE_PYTHON}</string>
     <key>VERIFIED_PYPI_UPSTREAM</key>
     <string>${VERIFIED_PYPI_UPSTREAM}</string>
   </dict>
@@ -200,6 +203,7 @@ Environment=QUARANTINE_HOURS=${QUARANTINE_HOURS}
 Environment=PORT=${PORT}
 Environment=NPM_UPSTREAM=${NPM_UPSTREAM}
 Environment=PYPI_UPSTREAM=${PYPI_UPSTREAM}
+Environment=ENABLE_PYTHON=${ENABLE_PYTHON}
 Environment=VERIFIED_PYPI_UPSTREAM=${VERIFIED_PYPI_UPSTREAM}
 Restart=on-failure
 RestartSec=5
@@ -284,7 +288,7 @@ set_defaults() {
   fi
 
   local PYTHON_READY=0
-  if [[ "$PYPI_UPSTREAM" == "https://pypi.org" || "$VERIFIED_PYPI_UPSTREAM" == "$PYPI_UPSTREAM" ]]; then
+  if [[ "$ENABLE_PYTHON" == "1" && ( "$PYPI_UPSTREAM" == "https://pypi.org" || "$VERIFIED_PYPI_UPSTREAM" == "$PYPI_UPSTREAM" ) ]]; then
     PYTHON_READY=1
   fi
 
@@ -307,7 +311,11 @@ set_defaults() {
       green "  ✓ uv (added UV_INDEX_URL to shell profile)"
     fi
   elif command -v pip &>/dev/null || command -v pip3 &>/dev/null || command -v uv &>/dev/null; then
-    dim "  ○ Python package managers skipped: custom PyPI upstream is not verified"
+    if [[ "$ENABLE_PYTHON" != "1" ]]; then
+      dim "  ○ Python package managers skipped: ENABLE_PYTHON=1 is required"
+    else
+      dim "  ○ Python package managers skipped: custom PyPI upstream is not verified"
+    fi
   fi
 
   echo ""
@@ -508,6 +516,7 @@ usage() {
     PORT=4873                  Port to run on (default: 4873)
     NPM_UPSTREAM=...           Override upstream npm registry
     PYPI_UPSTREAM=...          Override upstream PyPI registry
+    ENABLE_PYTHON=1            Enable Python routing/config in the service
     VERIFIED_PYPI_UPSTREAM=... Mark a custom PyPI upstream as verified
 
 EOF

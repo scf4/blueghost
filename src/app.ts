@@ -5,10 +5,17 @@ import { handlePypiRequest, isPypiPath } from "./registry/pypi";
 export async function handleProxyRequest(req: Request): Promise<Response> {
   const url = new URL(req.url);
 
+  if (url.pathname === "/healthz") {
+    return new Response("ok", { status: 200 });
+  }
+
   try {
     if (isPypiPath(url.pathname)) {
       if (!config.enablePython) {
-        return new Response("python support is disabled", { status: 503 });
+        return new Response(
+          "python support is disabled - run blueghost setup to enable it",
+          { status: 503 },
+        );
       }
       return await handlePypiRequest(req, url);
     }

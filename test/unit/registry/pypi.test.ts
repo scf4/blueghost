@@ -39,10 +39,30 @@ test("findQuarantinedReleases blocks files from versions newer than the quaranti
 
   expect(result.quarantined).toEqual(["1.1.0"]);
   expect(result.totalVersions).toBe(2);
+  expect(result.unverifiableVersions).toEqual([]);
   expect([...result.blockedFiles].sort()).toEqual([
     "demo-1.1.0-py3-none-any.whl",
     "demo-1.1.0.tar.gz",
   ]);
+});
+
+test("findQuarantinedReleases marks releases without timestamps as unverifiable", () => {
+  const result = findQuarantinedReleases({
+    "1.0.0": [
+      {
+        filename: "demo-1.0.0.tar.gz",
+        upload_time: "2026-03-25T00:00:00.000Z",
+      },
+    ],
+    "1.1.0": [
+      {
+        filename: "demo-1.1.0.tar.gz",
+        upload_time: "",
+      },
+    ],
+  });
+
+  expect(result.unverifiableVersions).toEqual(["1.1.0"]);
 });
 
 test("filterSimpleHtml removes quarantined file links", () => {
@@ -146,4 +166,37 @@ test("handlePypiRequest strips quarantined file links from simple pages", async 
   } finally {
     Date.now = realNow;
   }
+});
+
+test("handlePypiRequest fails closed when a release lacks upload timestamps", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+
+    if (url.endsWith("/pypi/demo/json")) {
+      return Response.json({
+        releases: {
+          "1.0.0": [
+            {
+              filename: "demo-1.0.0.tar.gz",
+              upload_time: "2026-03-25T00:00:00.000Z",
+            },
+          ],
+          "1.1.0": [
+            {
+              filename: "demo-1.1.0.tar.gz",
+              upload_time: "",
+            },
+          ],
+        },
+      });
+    }
+
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  const url = new URL("http://127.0.0.1:4873/simple/demo/");
+  const res = await handlePypiRequest(new Request(url), url);
+
+  expect(res.status).toBe(502);
+  expect(await res.text()).toContain("cannot verify version timestamps");
 });

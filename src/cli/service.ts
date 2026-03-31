@@ -19,6 +19,7 @@ export function installService(options: {
   }
 
   const projectDir = fileURLToPath(new URL("../..", import.meta.url));
+  const serverPath = `${projectDir}/src/server.ts`;
   const envLines = [
     ["QUARANTINE_HOURS", String(options.quarantineHours)],
     ["PORT", String(options.port)],
@@ -47,9 +48,9 @@ export function installService(options: {
   <string>com.blueghost.proxy</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${bunPath}</string>
+    <string>${escapeXml(bunPath)}</string>
     <string>run</string>
-    <string>${projectDir}/src/server.ts</string>
+    <string>${escapeXml(serverPath)}</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -89,7 +90,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${bunPath} run ${projectDir}/src/server.ts
+ExecStart=${bunPath} run ${serverPath}
 ${envLines.map(([key, value]) => `Environment=${key}=${escapeSystemd(value)}`).join("\n")}
 Restart=on-failure
 RestartSec=5

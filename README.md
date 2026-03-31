@@ -68,7 +68,7 @@ bun run src/cli.ts status
 bun run src/cli.ts uninstall
 ```
 
-`setup.sh` still exists as an advanced or manual path, but the CLI is the primary setup flow.
+`setup.sh` still exists as an advanced or manual path, but the CLI is the primary setup flow. If you use `setup.sh` directly and want Python support, set `ENABLE_PYTHON=1` explicitly.
 
 ## Important Caveats
 
@@ -92,7 +92,7 @@ Everything is configured with environment variables on the service:
 | `PORT` | `4873` | Local proxy port |
 | `NPM_UPSTREAM` | `https://registry.npmjs.org` | Upstream npm registry |
 | `PYPI_UPSTREAM` | `https://pypi.org` | Upstream PyPI registry |
-| `ENABLE_PYTHON` | `0` or `1` from setup | Whether Python routing is enabled in the service |
+| `ENABLE_PYTHON` | `0` | Whether Python routing is enabled in the service |
 | `VERIFIED_PYPI_UPSTREAM` | empty unless verified | Records which custom Python upstream passed setup verification |
 
 If you change `PYPI_UPSTREAM`, re-run `bun run cli:setup` so blueghost can probe the new upstream before enabling Python support.
