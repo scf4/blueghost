@@ -71,7 +71,7 @@ bun run src/cli.ts status
 bun run src/cli.ts uninstall
 ```
 
-`setup.sh` still exists as an advanced or manual path, but the CLI is the primary setup flow. If you use `setup.sh` directly and want Python support, set `ENABLE_PYTHON=1` explicitly.
+The Bun CLI is the only supported setup flow.
 
 ## Important Caveats
 
@@ -102,7 +102,7 @@ If you change `PYPI_UPSTREAM`, re-run `bun run cli:setup` so blueghost can probe
 
 ## Manual Package Manager Setup
 
-If you need to configure package managers manually instead of using `bun run cli:setup`:
+If you need to point package managers at the proxy manually after running `bun run cli:setup`:
 
 ```bash
 # npm / yarn classic / pnpm
@@ -120,7 +120,7 @@ pip config set global.trusted-host 127.0.0.1
 export UV_INDEX_URL="http://127.0.0.1:4873/simple/"
 ```
 
-For manual Python setup, the blueghost service must also be started with `ENABLE_PYTHON=1`; otherwise `/simple/*` requests are rejected even if pip or uv are pointed at the proxy.
+For manual Python setup, the blueghost service must have Python enabled via the CLI; otherwise `/simple/*` requests are rejected even if pip or uv are pointed at the proxy.
 
 ## Adding A New Registry
 

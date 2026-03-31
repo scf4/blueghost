@@ -19,7 +19,6 @@ export interface SetupTestEnvironment {
 }
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-const setupScript = join(repoRoot, "setup.sh");
 const tempDirs: string[] = [];
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -57,20 +56,6 @@ export function createFakeSetupEnvironment(): SetupTestEnvironment {
   writeCommand(join(binDir, "systemctl"), "#!/usr/bin/env bash\nexit 0\n");
 
   return { home, binDir, stateDir, xdgStateHome };
-}
-
-export function runSetup(
-  env: SetupTestEnvironment,
-  command: string,
-  extraEnv: Record<string, string> = {},
-) {
-  const result = spawnText(env, ["bash", setupScript, command], "", extraEnv);
-
-  if (result.status !== 0) {
-    throw new Error(
-      `setup.sh ${command} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
-    );
-  }
 }
 
 export function runCli(
