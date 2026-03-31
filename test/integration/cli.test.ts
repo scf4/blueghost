@@ -112,7 +112,8 @@ test("cli setup enables Python for a verified custom upstream and status reports
   expect(readConfig(env.stateDir, "pip3", "global.index-url")).toBe(
     "http://127.0.0.1:4873/simple/",
   );
-  expect(status.stdout).toContain("Python: enabled (verified)");
+  expect(status.stdout).toContain("Python");
+  expect(status.stdout).toContain("enabled (verified)");
 });
 
 test("cli setup rerun restores Python managers when Python is disabled", () => {

@@ -6,6 +6,7 @@ import {
   DEFAULT_PYPI_UPSTREAM,
 } from "../config";
 
+import { banner, fail, fmt, gap, item, section, success, warn } from "./format";
 import {
   configurePackageManagers,
   detectPackageManagers,
@@ -40,7 +41,9 @@ export async function runSetupCommand() {
   const prompts = await createPromptSession();
 
   try {
+    banner();
     printDetectedManagers(detections);
+    gap();
 
     const defaults = {
       port: existing?.port ?? 4873,
@@ -54,6 +57,8 @@ export async function runSetupCommand() {
       enablePython: existing?.ecosystems.python ?? false,
     };
 
+    section("Ecosystems");
+    gap();
     const enableJs = await promptYesNo(
       prompts,
       "Enable JS/TS protection for npm/pnpm/yarn/bun?",
@@ -65,6 +70,9 @@ export async function runSetupCommand() {
       defaults.enablePython,
     );
 
+    gap();
+    section("Settings");
+    gap();
     const choices: SetupChoices = {
       enableJs,
       enablePython,
@@ -94,21 +102,21 @@ export async function runSetupCommand() {
     let pythonVerified = false;
 
     if (pythonEnabled) {
+      gap();
+      section("Python verification");
+      gap();
       if (choices.pypiUpstream !== DEFAULT_PYPI_UPSTREAM) {
-        console.log(
-          `\nWarning: custom Python upstream detected (${choices.pypiUpstream}).`,
-        );
-        console.log(
-          "blueghost will only enable Python support if the upstream exposes the metadata needed for safe filtering.\n",
-        );
+        warn(`Custom Python upstream: ${choices.pypiUpstream}`);
+        console.log(`    ${fmt.dim("Probing to verify metadata availability...")}`);
+        gap();
       }
 
       const probe = await probePythonUpstream(choices.pypiUpstream);
       if (!probe.ok) {
-        console.log(`Python support disabled: ${probe.message}`);
+        fail(`Python support disabled: ${probe.message}`);
         pythonEnabled = false;
       } else {
-        console.log(probe.message);
+        success(probe.message);
         pythonVerified = true;
       }
     }
@@ -148,6 +156,10 @@ export async function runSetupCommand() {
       restorePackageManagers(disabledManagers);
     }
 
+    gap();
+    section("Installing");
+    gap();
+
     installService({
       port: choices.port,
       quarantineHours: choices.quarantineHours,
@@ -156,12 +168,17 @@ export async function runSetupCommand() {
       enablePython: pythonEnabled,
       verifiedPypiUpstream: pythonVerified ? choices.pypiUpstream : "",
     });
+    success("Background service installed");
 
     const configuredPackageManagers = configurePackageManagers({
       port: choices.port,
       jsEnabled: choices.enableJs,
       pythonEnabled,
     });
+
+    for (const pm of configuredPackageManagers) {
+      success(`${pm} configured`);
+    }
 
     const record = buildSetupRecord({
       choices,
@@ -173,10 +190,16 @@ export async function runSetupCommand() {
     saveSetupRecord(record);
     deletePendingSetup();
 
-    console.log("\nSetup complete.");
-    console.log(`Proxy: ${localProxyOrigin(choices.port)}`);
-    console.log(`JS/TS protection: ${choices.enableJs ? "enabled" : "disabled"}`);
-    console.log(`Python protection: ${pythonEnabled ? "enabled (verified)" : "disabled"}`);
+    gap();
+    section("Done");
+    gap();
+    item("Proxy", localProxyOrigin(choices.port));
+    item("Quarantine", `${choices.quarantineHours}h`);
+    item("JS/TS", choices.enableJs ? fmt.green("enabled") : fmt.dim("disabled"), choices.enableJs);
+    item("Python", pythonEnabled ? fmt.green("enabled (verified)") : fmt.dim("disabled"), pythonEnabled);
+    gap();
+    console.log(`  ${fmt.dim("Run")} bun run cli:status ${fmt.dim("to check protection state.")}`);
+    gap();
   } finally {
     prompts.close();
   }
@@ -190,8 +213,11 @@ export async function runStatusCommand() {
     return;
   }
 
+  banner();
+
   if (pending) {
-    console.log("Warning: previous setup did not complete cleanly.\n");
+    warn("Previous setup did not complete cleanly.");
+    gap();
   }
 
   const effectiveRecord = record ?? pending!.intendedRecord;
@@ -199,37 +225,52 @@ export async function runStatusCommand() {
   const serviceHealthy = await isServiceResponsive(proxyOrigin);
   const statuses = getPackageManagerStatus(effectiveRecord.port);
 
-  console.log("blueghost status\n");
-  console.log(`Service: ${serviceHealthy ? "running" : "not running"} (${proxyOrigin})`);
-  console.log(
-    `JS/TS: ${effectiveRecord.ecosystems.js ? "enabled" : "disabled"}${
-      effectiveRecord.ecosystems.js ? renderManagerSummary(["npm", "pnpm", "yarn", "bun"], statuses) : ""
-    }`,
-  );
-  console.log(
-    `Python: ${
-      effectiveRecord.ecosystems.python
-        ? effectiveRecord.python.verified
-          ? "enabled (verified)"
-          : "enabled (unverified)"
-        : "disabled"
-    }${
-      effectiveRecord.ecosystems.python
-        ? renderManagerSummary(["pip", "uv"], statuses)
-        : ""
-    }`,
-  );
-  if (!effectiveRecord.python.verified && effectiveRecord.upstreams.pypi !== DEFAULT_PYPI_UPSTREAM) {
-    console.log("Warning: Python upstream is custom and not verified.");
+  section("Service");
+  gap();
+  if (serviceHealthy) {
+    item("Status", fmt.green("running"));
+    item("Address", proxyOrigin);
+  } else {
+    item("Status", fmt.red("not running"), false);
+    item("Address", proxyOrigin, false);
   }
+  gap();
+
+  section("Protection");
+  gap();
+  const jsLabel = effectiveRecord.ecosystems.js ? fmt.green("enabled") : fmt.dim("disabled");
+  const jsManagers = effectiveRecord.ecosystems.js
+    ? ` ${fmt.dim(renderManagerList(["npm", "pnpm", "yarn", "bun"], statuses))}`
+    : "";
+  item("JS/TS", `${jsLabel}${jsManagers}`, effectiveRecord.ecosystems.js);
+
+  const pythonLabel = effectiveRecord.ecosystems.python
+    ? effectiveRecord.python.verified
+      ? fmt.green("enabled (verified)")
+      : fmt.yellow("enabled (unverified)")
+    : fmt.dim("disabled");
+  const pythonManagers = effectiveRecord.ecosystems.python
+    ? ` ${fmt.dim(renderManagerList(["pip", "uv"], statuses))}`
+    : "";
+  item("Python", `${pythonLabel}${pythonManagers}`, effectiveRecord.ecosystems.python);
+
+  if (!effectiveRecord.python.verified && effectiveRecord.upstreams.pypi !== DEFAULT_PYPI_UPSTREAM) {
+    gap();
+    warn("Python upstream is custom and not verified.");
+  }
+  gap();
 }
 
 export async function runUninstallCommand() {
   const pending = loadPendingSetup();
   const record = loadSetupRecord();
+
+  banner();
+
   if (!record && !pending) {
-    console.log("No CLI setup record found. Removing service if present.");
+    console.log(`  ${fmt.dim("No setup record found. Removing service if present.")}`);
     uninstallService();
+    gap();
     return;
   }
 
@@ -242,7 +283,12 @@ export async function runUninstallCommand() {
   deleteSetupRecord();
   deletePendingSetup();
 
-  console.log("blueghost uninstall complete.");
+  success("Service removed");
+  success("Package manager configs restored");
+  success("Setup record cleared");
+  gap();
+  console.log(`  ${fmt.dim("blueghost has been fully uninstalled.")}`);
+  gap();
 }
 
 function printDetectedManagers(detections: ReturnType<typeof detectPackageManagers>) {
@@ -250,9 +296,13 @@ function printDetectedManagers(detections: ReturnType<typeof detectPackageManage
     .filter(([, enabled]) => enabled)
     .map(([name]) => name);
 
-  console.log("Detected package managers:");
-  console.log(detected.length > 0 ? `  ${detected.join(", ")}` : "  none");
-  console.log("");
+  section("Detected");
+  gap();
+  if (detected.length > 0) {
+    console.log(`  ${fmt.dim("*")} ${detected.join(fmt.dim(", "))}`);
+  } else {
+    console.log(`  ${fmt.dim("  none")}`);
+  }
 }
 
 async function promptYesNo(
@@ -310,7 +360,7 @@ function recoverFromPendingSetup() {
     return;
   }
 
-  console.log("Recovering from incomplete previous setup.");
+  warn("Recovering from incomplete previous setup.");
   // Prefer a full restore to the user's pre-blueghost state over trying to
   // preserve a half-applied setup. A failed rerun should never strand package
   // managers pointing at a proxy configuration we can no longer trust.
@@ -320,12 +370,12 @@ function recoverFromPendingSetup() {
   deletePendingSetup();
 }
 
-function renderManagerSummary(
+function renderManagerList(
   managers: Array<keyof ReturnType<typeof getPackageManagerStatus>>,
   statuses: ReturnType<typeof getPackageManagerStatus>,
 ): string {
   const active = managers.filter((manager) => statuses[manager]);
-  return active.length > 0 ? ` (${active.join(", ")})` : " (not configured)";
+  return active.length > 0 ? `(${active.join(", ")})` : "(not configured)";
 }
 
 interface PromptSession {
